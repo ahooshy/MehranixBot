@@ -11,7 +11,7 @@ log = logging.getLogger(__name__)
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 PPLX_API_KEY = os.environ.get("PPLX_API_KEY", "")
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
-PORT = int(os.environ.get("PORT", 8080))
+PORT = int(os.environ.get("PORT", 3000))
 
 # Per-chat conversation history
 conversations: dict[int, list[dict]] = {}

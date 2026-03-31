@@ -2,8 +2,6 @@ import os
 import httpx
 import asyncio
 import logging
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import threading
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -11,53 +9,31 @@ log = logging.getLogger(__name__)
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 PPLX_API_KEY = os.environ.get("PPLX_API_KEY", "")
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
-PORT = int(os.environ.get("PORT", 3000))
 
-# Per-chat conversation history
 conversations: dict[int, list[dict]] = {}
 
 SYSTEM_PROMPT = (
     "You are Jarvis, a smart, friendly, and helpful AI assistant. "
     "You are concise, warm, and helpful. You respond in the same language the user uses. "
-    "Keep responses short and conversational since this is a Telegram chat. "
-    "You can help with anything — questions, ideas, advice, writing, coding, and more."
+    "Keep responses short and conversational since this is a Telegram chat."
 )
 
-# --- Tiny health check HTTP server so Railway doesn't kill the process ---
-class HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Jarvis is running")
-    def log_message(self, *args):
-        pass  # Suppress HTTP logs
-
-def start_health_server():
-    server = HTTPServer(("0.0.0.0", PORT), HealthHandler)
-    log.info(f"Health check server on port {PORT}")
-    server.serve_forever()
-
-# --- Telegram Bot Logic ---
 
 async def send_message(client: httpx.AsyncClient, chat_id: int, text: str):
     try:
         await client.post(f"{TELEGRAM_API}/sendMessage", json={
-            "chat_id": chat_id,
-            "text": text,
-            "parse_mode": "Markdown"
+            "chat_id": chat_id, "text": text, "parse_mode": "Markdown"
         })
     except Exception:
         await client.post(f"{TELEGRAM_API}/sendMessage", json={
-            "chat_id": chat_id,
-            "text": text
+            "chat_id": chat_id, "text": text
         })
 
 
 async def send_typing(client: httpx.AsyncClient, chat_id: int):
     try:
         await client.post(f"{TELEGRAM_API}/sendChatAction", json={
-            "chat_id": chat_id,
-            "action": "typing"
+            "chat_id": chat_id, "action": "typing"
         })
     except Exception:
         pass
@@ -95,7 +71,6 @@ async def get_ai_response(chat_id: int, user_message: str) -> str:
 async def handle_message(client: httpx.AsyncClient, message: dict):
     chat_id = message["chat"]["id"]
     text = message.get("text", "")
-
     if not text:
         return
 
@@ -103,9 +78,7 @@ async def handle_message(client: httpx.AsyncClient, message: dict):
 
     if text == "/start":
         await send_message(client, chat_id,
-            "👋 Hey! I'm *Jarvis*, your personal AI assistant.\n\n"
-            "Send me any message and I'll help — questions, writing, coding, ideas, anything!\n\n"
-            "Type /clear to reset the conversation."
+            "👋 Hey! I'm *Jarvis*, your personal AI assistant.\n\nJust type anything and I'll help!"
         )
         return
 
@@ -114,36 +87,31 @@ async def handle_message(client: httpx.AsyncClient, message: dict):
         await send_message(client, chat_id, "🧹 Conversation cleared!")
         return
 
-    if text == "/help":
-        await send_message(client, chat_id,
-            "*Commands:*\n/start — Welcome\n/clear — Reset conversation\n/help — This message\n\nJust type anything to chat!"
-        )
-        return
-
     await send_typing(client, chat_id)
 
     try:
         reply = await get_ai_response(chat_id, text)
         await send_message(client, chat_id, reply)
     except Exception as e:
-        log.error(f"Error getting AI response: {e}")
+        log.error(f"Error: {e}")
         await send_message(client, chat_id, "Sorry, something went wrong. Please try again.")
 
 
-async def run_polling():
+async def main():
     if not BOT_TOKEN:
-        log.error("BOT_TOKEN not set!")
+        log.error("BOT_TOKEN is not set! Exiting.")
         return
     if not PPLX_API_KEY:
-        log.error("PPLX_API_KEY not set!")
+        log.error("PPLX_API_KEY is not set! Exiting.")
         return
 
-    log.info("Jarvis bot starting (long polling)...")
+    log.info("Jarvis bot starting...")
     offset = 0
 
     async with httpx.AsyncClient(timeout=60) as client:
-        await client.post(f"{TELEGRAM_API}/deleteWebhook")
-        log.info("Polling active — waiting for messages...")
+        r = await client.post(f"{TELEGRAM_API}/deleteWebhook")
+        log.info(f"Webhook cleared: {r.json()}")
+        log.info("Polling for messages...")
 
         while True:
             try:
@@ -154,7 +122,7 @@ async def run_polling():
                 data = response.json()
 
                 if not data.get("ok"):
-                    log.warning(f"Telegram API error: {data}")
+                    log.warning(f"Telegram error: {data}")
                     await asyncio.sleep(5)
                     continue
 
@@ -171,9 +139,4 @@ async def run_polling():
 
 
 if __name__ == "__main__":
-    # Start health check server in background thread (Railway requires an open port)
-    thread = threading.Thread(target=start_health_server, daemon=True)
-    thread.start()
-
-    # Run the bot
-    asyncio.run(run_polling())
+    asyncio.run(main())
